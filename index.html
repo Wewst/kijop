@@ -8920,6 +8920,41 @@ document.addEventListener('DOMContentLoaded', function() {
     // + Бэкенд инициализация
     setTimeout(initUserSafe, 1000);
 });
+
+  // Безопасное добавление в корзину - только логирование
+async function addToCartSafe(productId) {
+    // Сначала всегда используем локальную функцию
+    const result = originalAddToCart(productId);
+    
+    // Потом пробуем синхронизировать с бэкендом
+    if (isBackendAvailable) {
+        try {
+            const userId = localStorage.getItem('backendUserId');
+            if (!userId) return result;
+            
+            const response = await fetch(${API_BASE}/cart/add, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    productId: productId,
+                    userId: userId,
+                    quantity: 1
+                })
+            });
+            
+            if (response.ok) {
+                console.log('✅ Товар синхронизирован с бэкендом');
+            }
+        } catch (error) {
+            console.log('❌ Ошибка синхронизации корзины:', error);
+        }
+    }
+    
+    return result;
+}
+
+// Пока НЕ переопределяем основную функцию
+// window.addToCart = addToCartSafe;
 </script>
 
 </body>
