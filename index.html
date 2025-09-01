@@ -8833,6 +8833,51 @@ if (!window.backendCheckStarted) {
         console.log('Бэкенд доступен:', isBackendAvailable);
     }, 2000);
 }
+
+  // ==================== ПОСТЕПЕННОЕ ПОДКЛЮЧЕНИЕ ====================
+const API_BASE = 'http://localhost:3000/api';
+let isBackendAvailable = false;
+
+// Проверка подключения
+async function checkBackendConnection() {
+    try {
+        const response = await fetch(${API_BASE}/health);
+        const data = await response.json();
+        isBackendAvailable = data.status === 'OK';
+        console.log('Бэкенд доступен:', isBackendAvailable);
+        return isBackendAvailable;
+    } catch (error) {
+        console.log('Бэкенд недоступен');
+        isBackendAvailable = false;
+        return false;
+    }
+}
+
+// Только мониторинг - НЕ переопределяем функции пока
+setTimeout(async () => {
+    const connected = await checkBackendConnection();
+    
+    if (connected) {
+        // Просто показываем статус
+        const statusDiv = document.createElement('div');
+        statusDiv.style.cssText = 
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: green;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 10000;
+            font-size: 12px;
+        ;
+        statusDiv.textContent = '🟢 Бэкенд подключен';
+        statusDiv.id = 'backend-status';
+        document.body.appendChild(statusDiv);
+        
+        console.log('✅ Бэкенд готов к работе');
+    }
+}, 3000);
 </script>
 
 </body>
