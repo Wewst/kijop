@@ -8769,192 +8769,285 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <script>
-// ==================== БЕЗОПАСНОЕ ПОДКЛЮЧЕНИЕ ====================
-
-// Флаг для отключения бэкенда при проблемах
-const BACKEND_ENABLED = true; // ПОКА ВЫКЛЮЧИТЕ
-
-// Проверяем, не были ли уже объявлены переменные
-if (typeof window.originalAddToCart === 'undefined') {
-    window.originalAddToCart = window.addToCart;
-}
-
-if (typeof window.originalProcessPayment === 'undefined') {
-    window.originalProcessPayment = window.processPayment;
-}
-
-// Простая проверка подключения
-async function checkBackend() {
-    if (!BACKEND_ENABLED) return false;
-    
-    try {
-        const response = await fetch('http://localhost:3000/api/health', {
-            timeout: 3000
-        });
-        return response.ok;
-    } catch (error) {
-        console.log('Бэкенд недоступен');
-        return false;
-    }
-}
-
-// Безопасное добавление в корзину
-if (typeof window.addToCart === 'undefined' || window.addToCart === originalAddToCart) {
-    window.addToCart = async function(productId) {
-        if (BACKEND_ENABLED && await checkBackend()) {
-            try {
-                const response = await fetch('http://localhost:3000/api/cart/add', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ productId: productId })
-                });
-                
-                if (response.ok) {
-                    console.log('Товар добавлен через бэкенд');
-                    return;
-                }
-            } catch (error) {
-                console.log('Ошибка бэкенда, используем локальное хранилище');
-            }
-        }
-        
-        // Всегда используем локальное хранилище
-        if (typeof originalAddToCart === 'function') {
-            return originalAddToCart(productId);
-        }
-    };
-}
-
-// Запускаем проверку при загрузке (только один раз)
-if (!window.backendCheckStarted) {
-    window.backendCheckStarted = true;
-    setTimeout(async () => {
-        const isBackendAvailable = await checkBackend();
-        console.log('Бэкенд доступен:', isBackendAvailable);
-    }, 2000);
-}
-
-  // ==================== ПОСТЕПЕННОЕ ПОДКЛЮЧЕНИЕ ====================
+// ==================== БЕЗОПАСНАЯ ИНТЕГРАЦИЯ С БЭКЕНДОМ ====================
 const API_BASE = 'http://localhost:3000/api';
 let isBackendAvailable = false;
+let backendUserId = null;
 
-// Проверка подключения
+// 1. ПРОВЕРКА ПОДКЛЮЧЕНИЯ К БЭКЕНДУ
 async function checkBackendConnection() {
     try {
-        const response = await fetch(${API_BASE}/health);
-        const data = await response.json();
-        isBackendAvailable = data.status === 'OK';
-        console.log('Бэкенд доступен:', isBackendAvailable);
-        return isBackendAvailable;
+        console.log('🔍 Проверяем подключение к бэкенду...');
+        const response = await fetch(`${API_BASE}/health`, {
+            signal: AbortSignal.timeout(3000)
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            isBackendAvailable = data.status === 'OK';
+            console.log('✅ Бэкенд доступен:', data);
+            return true;
+        }
+        throw new Error('Бэкенд не отвечает');
     } catch (error) {
-        console.log('Бэкенд недоступен');
+        console.log('❌ Бэкенд недоступен:', error.message);
         isBackendAvailable = false;
         return false;
     }
 }
 
-// Только мониторинг - НЕ переопределяем функции пока
-setTimeout(async () => {
-    const connected = await checkBackendConnection();
+// 2. ИНИЦИАЛИЗАЦИЯ ПОЛЬЗОВАТЕЛЯ В БЭКЕНДЕ
+async function initBackendUser() {
+    if (!isBackendAvailable) return null;
     
-    if (connected) {
-        // Просто показываем статус
-        const statusDiv = document.createElement('div');
-        statusDiv.style.cssText = 
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            background: green;
-            color: white;
-            padding: 10px;
-            border-radius: 5px;
-            z-index: 10000;
-            font-size: 12px;
-        ;
-        statusDiv.textContent = '🟢 Бэкенд подключен';
-        statusDiv.id = 'backend-status';
-        document.body.appendChild(statusDiv);
-        
-        console.log('✅ Бэкенд готов к работе');
-    }
-}, 3000);
-
-  // Безопасная инициализация пользователя
-async function initUserSafe() {
-    if (!isBackendAvailable) {
-        console.log('Бэкенд недоступен, используем локальные данные');
-        initUserData(); // Ваша оригинальная функция
-        return;
-    }
-
     try {
-        const response = await fetch(${API_BASE}/auth/init, {
+        console.log('👤 Инициализируем пользователя в бэкенде...');
+        
+        // Получаем данные из Telegram WebApp
+        const initData = window.Telegram?.WebApp?.initData || '';
+        const userData = window.Telegram?.WebApp?.initDataUnsafe?.user || {};
+        
+        const response = await fetch(`${API_BASE}/auth/init`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                initData: window.Telegram?.WebApp?.initData || 'test'
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${initData}`
+            },
+            body: JSON.stringify({
+                initData: initData,
+                user: userData
             })
         });
         
         if (response.ok) {
             const data = await response.json();
-            console.log('Пользователь инициализирован в бэкенде:', data);
+            console.log('✅ Пользователь инициализирован:', data);
             
             // Сохраняем ID пользователя
-            localStorage.setItem('backendUserId', data.user.id);
+            backendUserId = data.user.id;
+            localStorage.setItem('backendUserId', backendUserId);
             
-        } else {
-            throw new Error('Ошибка инициализации');
+            // Обновляем баланс из бэкенда
+            if (data.user.balance !== undefined) {
+                document.getElementById('balance').textContent = data.user.balance;
+                localStorage.setItem('userBalance', data.user.balance);
+            }
+            
+            return data.user;
         }
+        throw new Error('Ошибка инициализации пользователя');
     } catch (error) {
-        console.log('Ошибка инициализации в бэкенде:', error);
-        initUserData(); // Fallback
+        console.log('❌ Ошибка инициализации пользователя:', error);
+        return null;
     }
 }
 
-// Замените вызов инициализации
-document.addEventListener('DOMContentLoaded', function() {
-    // Ваша оригинальная инициализация
-    initUserData();
+// 3. СИНХРОНИЗАЦИЯ КОРЗИНЫ С БЭКЕНДОМ
+async function syncCartWithBackend() {
+    if (!isBackendAvailable || !backendUserId) return;
     
-    // + Бэкенд инициализация
-    setTimeout(initUserSafe, 1000);
-});
-
-  // Безопасное добавление в корзину - только логирование
-async function addToCartSafe(productId) {
-    // Сначала всегда используем локальную функцию
-    const result = originalAddToCart(productId);
-    
-    // Потом пробуем синхронизировать с бэкендом
-    if (isBackendAvailable) {
-        try {
-            const userId = localStorage.getItem('backendUserId');
-            if (!userId) return result;
+    try {
+        // Получаем текущую корзину из localStorage
+        const storageCart = JSON.parse(localStorage.getItem('storageCart') || '[]');
+        
+        if (storageCart.length > 0) {
+            console.log('🛒 Синхронизируем корзину с бэкендом...');
             
-            const response = await fetch(${API_BASE}/cart/add, {
+            const response = await fetch(`${API_BASE}/cart/sync`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    productId: productId,
-                    userId: userId,
-                    quantity: 1
+                    userId: backendUserId,
+                    items: storageCart
                 })
             });
             
             if (response.ok) {
-                console.log('✅ Товар синхронизирован с бэкендом');
+                console.log('✅ Корзина синхронизирована');
+            }
+        }
+    } catch (error) {
+        console.log('❌ Ошибка синхронизации корзины:', error);
+    }
+}
+
+// 4. БЕЗОПАСНОЕ ДОБАВЛЕНИЕ В КОРЗИНУ
+const originalAddToCart = window.addToCart;
+window.addToCart = async function(productId) {
+    // Сначала вызываем оригинальную функцию
+    const result = originalAddToCart(productId);
+    
+    // Затем синхронизируем с бэкендом
+    if (isBackendAvailable && backendUserId) {
+        try {
+            const product = productsData.find(p => p.id === productId);
+            if (!product) return result;
+            
+            const response = await fetch(`${API_BASE}/cart/add`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userId: backendUserId,
+                    productId: productId,
+                    name: product.title,
+                    price: product.price,
+                    quantity: 1,
+                    image: product.image
+                })
+            });
+            
+            if (response.ok) {
+                console.log('✅ Товар добавлен в бэкенд');
             }
         } catch (error) {
-            console.log('❌ Ошибка синхронизации корзины:', error);
+            console.log('❌ Ошибка добавления в корзину бэкенда:', error);
         }
     }
     
     return result;
+};
+
+// 5. БЕЗОПАСНАЯ ОБРАБОТКА ПЛАТЕЖЕЙ
+const originalProcessPayment = window.processPayment;
+window.processPayment = async function(amount) {
+    if (isBackendAvailable && backendUserId) {
+        try {
+            console.log('💳 Обрабатываем платеж через бэкенд...');
+            
+            const response = await fetch(`${API_BASE}/payment/process`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userId: backendUserId,
+                    amount: amount,
+                    currency: 'RUB',
+                    description: 'Пополнение баланса'
+                })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('✅ Платеж обработан:', data);
+                
+                // Обновляем баланс
+                document.getElementById('balance').textContent = data.newBalance;
+                localStorage.setItem('userBalance', data.newBalance);
+                
+                showToast('Платеж успешно обработан!');
+                return;
+            }
+        } catch (error) {
+            console.log('❌ Ошибка обработки платежа:', error);
+        }
+    }
+    
+    // Fallback к оригинальной логике
+    return originalProcessPayment(amount);
+};
+
+// 6. ЗАГРУЗКА ДАННЫХ ИЗ БЭКЕНДА
+async function loadBackendData() {
+    if (!isBackendAvailable || !backendUserId) return;
+    
+    try {
+        // Загружаем корзину из бэкенда
+        const response = await fetch(`${API_BASE}/cart/${backendUserId}`);
+        if (response.ok) {
+            const cartData = await response.json();
+            
+            if (cartData.items && cartData.items.length > 0) {
+                // Обновляем локальную корзину
+                localStorage.setItem('storageCart', JSON.stringify(cartData.items));
+                console.log('🛒 Корзина загружена из бэкенда');
+                
+                // Обновляем интерфейс если нужно
+                if (typeof renderStorageCart === 'function') {
+                    renderStorageCart();
+                }
+            }
+        }
+    } catch (error) {
+        console.log('❌ Ошибка загрузки данных:', error);
+    }
 }
 
-  window.addToCart = addToCartSafe;
-</script>
+// 7. ИНИЦИАЛИЗАЦИЯ ВСЕЙ СИСТЕМЫ
+async function initBackendIntegration() {
+    console.log('🚀 Инициализируем интеграцию с бэкендом...');
+    
+    // Проверяем подключение
+    isBackendAvailable = await checkBackendConnection();
+    
+    if (!isBackendAvailable) {
+        console.log('ℹ️ Работаем в оффлайн-режиме');
+        return;
+    }
+    
+    // Инициализируем пользователя
+    const backendUser = await initBackendUser();
+    
+    if (backendUser) {
+        // Загружаем данные
+        await loadBackendData();
+        
+        // Показываем статус
+        showBackendStatus(true);
+    }
+}
 
+// 8. ОТОБРАЖЕНИЕ СТАТУСА БЭКЕНДА
+function showBackendStatus(connected) {
+    let statusElement = document.getElementById('backend-status');
+    
+    if (!statusElement) {
+        statusElement = document.createElement('div');
+        statusElement.id = 'backend-status';
+        statusElement.style.cssText = `
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            z-index: 10000;
+            backdrop-filter: blur(10px);
+        `;
+        document.body.appendChild(statusElement);
+    }
+    
+    if (connected) {
+        statusElement.textContent = '🟢 Бэкенд подключен';
+        statusElement.style.background = 'rgba(76, 175, 80, 0.9)';
+        statusElement.style.color = 'white';
+    } else {
+        statusElement.textContent = '🔴 Бэкенд отключен';
+        statusElement.style.background = 'rgba(244, 67, 54, 0.9)';
+        statusElement.style.color = 'white';
+    }
+}
+
+// 9. ЗАПУСК ИНТЕГРАЦИИ
+document.addEventListener('DOMContentLoaded', function() {
+    // Запускаем после небольшой задержки
+    setTimeout(async () => {
+        await initBackendIntegration();
+        
+        // Периодическая синхронизация
+        setInterval(syncCartWithBackend, 30000); // Каждые 30 секунд
+    }, 2000);
+});
+
+// 10. УТИЛИТЫ ДЛЯ ОТЛАДКИ
+window.debugBackend = {
+    checkConnection: checkBackendConnection,
+    getUser: () => backendUserId,
+    getStatus: () => isBackendAvailable,
+    syncCart: syncCartWithBackend,
+    forceReload: initBackendIntegration
+};
+
+console.log('🔧 Инструменты отладки: debugBackend');
+</script>
 </body>
 </html>
