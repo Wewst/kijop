@@ -8878,6 +8878,48 @@ setTimeout(async () => {
         console.log('✅ Бэкенд готов к работе');
     }
 }, 3000);
+
+  // Безопасная инициализация пользователя
+async function initUserSafe() {
+    if (!isBackendAvailable) {
+        console.log('Бэкенд недоступен, используем локальные данные');
+        initUserData(); // Ваша оригинальная функция
+        return;
+    }
+
+    try {
+        const response = await fetch(${API_BASE}/auth/init, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                initData: window.Telegram?.WebApp?.initData || 'test'
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log('Пользователь инициализирован в бэкенде:', data);
+            
+            // Сохраняем ID пользователя
+            localStorage.setItem('backendUserId', data.user.id);
+            
+        } else {
+            throw new Error('Ошибка инициализации');
+        }
+    } catch (error) {
+        console.log('Ошибка инициализации в бэкенде:', error);
+        initUserData(); // Fallback
+    }
+}
+
+// Замените вызов инициализации
+document.addEventListener('DOMContentLoaded', function() {
+    // Ваша оригинальная инициализация
+    initUserData();
+    
+    // + Бэкенд инициализация
+    setTimeout(initUserSafe, 1000);
+});
 </script>
 
 </body>
