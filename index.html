@@ -8953,8 +8953,7 @@ async function addToCartSafe(productId) {
     return result;
 }
 
-// Пока НЕ переопределяем основную функцию
-// window.addToCart = addToCartSafe;
+  window.addToCart = addToCartSafe;
 </script>
 
 </body>
